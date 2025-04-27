@@ -3151,6 +3151,41 @@ bool clip_image_batch_encode(clip_ctx * ctx, const int n_threads, const clip_ima
             std::vector<int> idx    (ph * pw);
             std::vector<int> inv_idx(ph * pw);
 
+            struct ggml_tensor * positions = ggml_graph_get_tensor(gf, "positions");
+            std::vector<int> positions_data(ggml_nelements(positions));
+            int * data = positions_data.data();
+
+            int ptr = 0;
+            for (int y = 0; y < iph; y += merge_ratio)
+            {
+                for (int x = 0; x < ipw; x += merge_ratio)
+                {
+                    for (int dy = 0; dy < 2; dy++) {
+                        for (int dx = 0; dx < 2; dx++) {
+                            data[                  ptr] = y + dy;
+                            data[    num_patches + ptr] = x + dx;
+                            data[2 * num_patches + ptr] = y + dy;
+                            data[3 * num_patches + ptr] = x + dx;
+                            ptr++;
+                        }
+                    }
+                }
+            }
+
+            ggml_backend_tensor_set(positions, data, 0, ggml_nbytes(positions));
+        }
+        else if (ctx->proj_type == PROJECTOR_TYPE_QWEN25VL) {
+            // pw * ph = number of tokens output by ViT after apply patch merger
+            // ipw * ipw = number of vision token been processed inside ViT
+            const int merge_ratio = 2;
+            const int pw  = image_size_width  / patch_size / merge_ratio;
+            const int ph  = image_size_height / patch_size / merge_ratio;
+            const int ipw = image_size_width  / patch_size;
+            const int iph = image_size_height / patch_size;
+
+            std::vector<int> idx    (ph * pw);
+            std::vector<int> inv_idx(ph * pw);
+
             if (use_window_attn) {
                 const int attn_window_size = 112;
                 struct ggml_tensor * window_idx     = ggml_graph_get_tensor(gf, "window_idx");
@@ -3277,65 +3312,6 @@ bool clip_image_batch_encode(clip_ctx * ctx, const int n_threads, const clip_ima
                 free(patches_data);
             }
         }
-    }
-
-    if (use_window_attn && ctx->proj_type == PROJECTOR_TYPE_QWEN25VL) {
-        struct ggml_tensor * window_idx = ggml_graph_get_tensor(gf, "window_idx");
-        struct ggml_tensor * inv_window_idx = ggml_graph_get_tensor(gf, "inv_window_idx");
-        struct ggml_tensor * window_mask = ggml_graph_get_tensor(gf, "window_mask");
-
-        const int merge_ratio = 2;
-        const int attn_window_size = 112;
-        const int pw = image_size_width / patch_size / merge_ratio;
-        const int ph = image_size_height / patch_size / merge_ratio;
-        const int grid_window = attn_window_size / patch_size / merge_ratio;
-        const int ipw = image_size_width / patch_size;
-        const int iph = image_size_height / patch_size;
-        /*
-        pw * ph = number of tokens output by ViT after apply patch merger
-        ipw * ipw = number of vision token been processed inside ViT
-        */
-
-        std::vector<int> idx(ph * pw);
-        std::vector<int> inv_idx(ph * pw);
-        int dst = 0;
-        // [num_vision_tokens, num_vision_tokens] attention mask tensor
-        std::vector<float> mask(pow(ipw * iph, 2), std::numeric_limits<float>::lowest());
-        int mask_row = 0;
-
-        for (int y = 0; y < ph; y+=grid_window)
-        {
-            for (int x = 0; x < pw; x+=grid_window)
-            {
-                const int win_h = std::min(grid_window, ph - y);
-                const int win_w = std::min(grid_window, pw - x);
-                const int dst_0 = dst;
-                // group all tokens belong to the same window togather (to a continue range)
-                for (int dy = 0; dy < win_h; dy++) {
-                    for (int dx = 0; dx < win_w; dx++) {
-                        const int src = (y + dy) * pw + (x + dx);
-                        assert(src < (int)idx.size());
-                        assert(dst < (int)inv_idx.size());
-                        idx[src] = dst;
-                        inv_idx[dst] = src;
-                        dst++;
-                    }
-                }
-
-                for (int r=0; r < win_h * win_w * merge_ratio * merge_ratio; r++) {
-                    int row_offset = mask_row * (ipw * iph);
-                    std::fill(
-                        mask.begin() + row_offset + (dst_0 * merge_ratio * merge_ratio),
-                        mask.begin() + row_offset + (dst   * merge_ratio * merge_ratio),
-                        0.0);
-                    mask_row++;
-                }
-            }
-        }
-
-        ggml_backend_tensor_set(window_idx, idx.data(), 0, ggml_nbytes(window_idx));
-        ggml_backend_tensor_set(inv_window_idx, inv_idx.data(), 0, ggml_nbytes(inv_window_idx));
-        ggml_backend_tensor_set(window_mask, mask.data(), 0, ggml_nbytes(window_mask));
     }
 
     ggml_backend_cpu_set_n_threads(ctx->backend_cpu, n_threads);
