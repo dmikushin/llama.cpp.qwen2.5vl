@@ -48,3 +48,32 @@ if (WIN32)
 endif()
 
 target_compile_features(${TARGET} PRIVATE cxx_std_17)
+
+# Add the qwen2vl-server target
+set(TARGET_QWEN2VL llama-qwen2vl-server)
+
+set(TARGET_QWEN2VL_SRCS
+    server.cpp
+    extensions/qwen2vl-server.cpp
+    utils.hpp
+    httplib.h
+)
+
+add_executable(${TARGET_QWEN2VL} ${TARGET_QWEN2VL_SRCS} ${TARGET_SRCS})
+install(TARGETS ${TARGET_QWEN2VL} RUNTIME)
+
+target_include_directories(${TARGET_QWEN2VL} PRIVATE ${CMAKE_SOURCE_DIR})
+target_include_directories(${TARGET_QWEN2VL} PRIVATE ${CMAKE_SOURCE_DIR}/examples/llava)
+target_link_libraries(${TARGET_QWEN2VL} PRIVATE common llava ${CMAKE_THREAD_LIBS_INIT})
+
+if (LLAMA_SERVER_SSL)
+    target_link_libraries(${TARGET_QWEN2VL} PRIVATE OpenSSL::SSL OpenSSL::Crypto)
+    target_compile_definitions(${TARGET_QWEN2VL} PRIVATE CPPHTTPLIB_OPENSSL_SUPPORT)
+endif()
+
+if (WIN32)
+    target_link_libraries(${TARGET_QWEN2VL} PRIVATE ws2_32)
+endif()
+
+target_compile_features(${TARGET_QWEN2VL} PRIVATE cxx_std_17)
+target_compile_definitions(${TARGET_QWEN2VL} PRIVATE LLAMA_SERVER_QWEN2VL)

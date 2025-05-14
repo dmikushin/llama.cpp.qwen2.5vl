@@ -28,7 +28,7 @@ RUN cmake -B build \
     -DCMAKE_CUDA_ARCHITECTURES=${CUDA_ARCH} \
     -DCMAKE_EXE_LINKER_FLAGS=-Wl,--allow-shlib-undefined \
     -G Ninja . && \
-    cmake --build build --config Release --target llama-qwen2vl-cli
+    cmake --build build --config Release --target llama-qwen2vl-cli llama-qwen2vl-server
 
 RUN mkdir -p /app/lib && \
     find build -name "*.so" -exec cp {} /app/lib \;
